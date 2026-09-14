@@ -2,6 +2,10 @@
  * Retain ST startup_stm32f411retx.s, system_stm32f4xx.c and linker script.
  * Do NOT call HAL_Init(), SystemClock_Config(), MX_* or another driver init.
  * Only one definition of each IRQ handler may be linked (see README). */
+#ifndef STM32F411xE
+#define STM32F411xE
+#endif
+
 #include "stm32f4xx.h"
 #include "road_board.h"
 

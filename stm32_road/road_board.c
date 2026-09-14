@@ -2,6 +2,10 @@
  * 0500. No HAL, no peripheral busy-wait loops, no ADC/UART polling.
  * Owns ADC1, USART2, DMA1 Stream6, TIM3, TIM4 and EXTI3/4/10 exclusively.
  * Clock assumption: RESET HSI 16 MHz, all bus prescalers /1. */
+#ifndef STM32F411xE
+#define STM32F411xE
+#endif
+
 #include "stm32f4xx.h"
 #include "road_board.h"
 #include "road_config.h"
@@ -222,7 +226,7 @@ void RoadBoard_Init(void)
     DMA1_Stream6->PAR = (uint32_t)(uintptr_t)&USART2->DR;
     USART2->CR1 = USART_CR1_UE | USART_CR1_TE;
 
-    /* US-100, jumper REMOVED, 3.3V supply, common ground.
+    /* US-100, jumper REMOVED, 5V supply for the tested module, common ground.
      * Morpho PC6 = ECHO / TIM3_CH1 AF2; PC8 = TRIG / TIM3_CH3 AF2.
      * Avoid PA0 (shield NTC) and PC7 (shield 7-segment decoder).
      * Confirm these Morpho pins are accessible on your shield revision. */
@@ -230,7 +234,9 @@ void RoadBoard_Init(void)
     GPIOC->AFR[0] = (GPIOC->AFR[0] & ~(15U<<24U)) | (2U<<24U);
     GPIOC->AFR[1] = (GPIOC->AFR[1] & ~15U) | 2U;
     GPIOC->OTYPER &= ~(1U<<8U);
-    GPIOC->PUPDR = (GPIOC->PUPDR & ~((3U<<12U)|(3U<<16U))) | (2U<<12U);
+    /* PC6 is an FT digital input. Keep its internal pulls disabled when the
+     * tested 5V-powered US-100 drives ECHO above the MCU supply voltage. */
+    GPIOC->PUPDR &= ~((3U<<12U)|(3U<<16U));
     TIM3->PSC = ROAD_CLOCK_HZ/1000000U-1U;
     TIM3->ARR = ROAD_ECHO_PERIOD_US-1U;
     /* CH1 rising direct TI1, CH2 falling indirect TI1. Hardware timestamps. */

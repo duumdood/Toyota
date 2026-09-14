@@ -48,7 +48,7 @@ Python ทำเพียงแปลงหน่วยและ interpolate **�
 | US-100 TRIG | **PC8 บน Morpho** | AF2, TIM3_CH3 PWM 12 µs ทุก 60 ms |
 | UART ไป PC | PA2 / USART2_TX | AF7 → ST-LINK Virtual COM, DMA1 Stream6 Channel4 |
 
-US-100 ใช้โหมด **ถอด jumper ด้านหลัง** (Trig/Echo), จ่าย **3.3 V** และต่อ GND ร่วมกับบอร์ด ตรวจรุ่นโมดูลและระดับสัญญาณจริงก่อนจ่ายไฟ ห้ามส่งแรงดัน 5 V เข้าขา analog LDR
+US-100 ตัวที่ทดสอบใช้โหมด **ถอด jumper ด้านหลัง** (Trig/Echo), จ่าย **5 V ที่ขา VCC** และต่อ GND ร่วมกับบอร์ด PC6 เป็นขา digital แบบ FT และโค้ดปิด internal pull ไว้ ห้ามส่งแรงดัน 5 V เข้าขา analog LDR หรือขา 3V3
 
 เลือก PC6/PC8 เพื่อไม่ใช้ PA0 ซึ่งเป็น NTC และ PC7 ซึ่งใช้กับ 7-segment บน shield ตามรูป lecture สำหรับ F411RE ตรวจ silk screen และ continuity ของ shield รุ่นจริง โดยเฉพาะข้อความ pin ทางเลือกของบอร์ดรุ่นอื่นในวงเล็บ ไม่ต้องต่ออะไรเข้าขา PA3 เพื่อสั่งงานจาก PC เพราะระบบนี้ส่งข้อมูลทางเดียว
 
