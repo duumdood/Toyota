@@ -21,6 +21,33 @@ static void step(RoadApp *a, RoadInputs *i, uint32_t *ms, uint32_t count)
 int run_tests(void);
 int run_tests(void)
 {
+    CHECK(Road_DesiredGap(20.0f,0.0f,false)==24.0f);
+    CHECK(Road_DesiredGap(20.0f,0.0f,true)==43.0f);
+    CHECK(Road_DesiredGap(20.0f,5.0f,false)>24.0f);
+    RoadApp led;
+    RoadInputs light = {0};
+    RoadApp_Init(&led);
+    led.out.target_mps=0.0f;
+    light.ldr_ready=true; light.ldr_adc=1000U;
+    light.range_ready=true; light.range_status=0U;
+    light.distance_mm=80U;
+    RoadApp_Tick(&led,&light,10U);
+    CHECK(led.out.red_target_permille==1000U);
+    light.distance_mm=90U;
+    RoadApp_Tick(&led,&light,20U);
+    CHECK(led.out.red_target_permille==500U);
+    light.distance_mm=100U;
+    RoadApp_Tick(&led,&light,30U);
+    CHECK(led.out.red_target_permille==0U);
+    led.out.speed_mps=20.0f;
+    RoadApp_Tick(&led,&light,40U);
+    CHECK(led.out.red_far_mm>100U && led.out.red_target_permille>0U);
+    light.range_status=1U;
+    RoadApp_Tick(&led,&light,50U);
+    CHECK(led.out.red_target_permille==0U);
+    light.range_status=0U;
+    RoadApp_Tick(&led,&light,1000U);
+    CHECK(led.out.red_target_permille==0U);
     RoadApp a;
     RoadInputs i = {0};
     uint32_t ms=0U;
@@ -49,10 +76,10 @@ int run_tests(void)
     a.out.target_mps=120.0f/3.6f;
     i.ldr_adc=3900U; step(&a,&i,&ms,39U); CHECK(!a.out.night);
     step(&a,&i,&ms,1U); CHECK(a.out.night && a.out.target_mps<=100.0f/3.6f);
-    i.ldr_adc=3650U; step(&a,&i,&ms,80U); CHECK(a.out.night);
-    i.ldr_adc=3200U; step(&a,&i,&ms,19U); CHECK(a.out.night);
+    i.ldr_adc=ROAD_NIGHT_EXIT_ADC; step(&a,&i,&ms,80U); CHECK(a.out.night);
+    i.ldr_adc=ROAD_NIGHT_EXIT_ADC-1U; step(&a,&i,&ms,19U); CHECK(a.out.night);
     step(&a,&i,&ms,1U); CHECK(!a.out.night);
-    i.ldr_adc=3790U; step(&a,&i,&ms,100U); CHECK(!a.out.night);
+    i.ldr_adc=ROAD_NIGHT_ENTER_ADC; step(&a,&i,&ms,100U); CHECK(!a.out.night);
 
     /* Constant measured range: signed lead estimate matches ego speed. */
     i.range_status=0U; i.distance_mm=1000U;

@@ -44,6 +44,7 @@ Python ทำเพียงแปลงหน่วยและ interpolate **�
 | Reset sequence | PB4 / D5 | Input pull-up, EXTI4 ทั้งสองขอบ |
 | LDR | PA1 / A1 | Analog ADC1_IN1 |
 | LED แสดงกลางคืน | PA5 / D13 | GPIO output |
+| LED แดงแสดงระยะ | PA6 / D12 | GPIO PWM 1 kHz จาก TIM2 update/compare interrupt |
 | US-100 ECHO | **PC6 บน Morpho** | AF2, TIM3_CH1 rising + CH2 indirect falling |
 | US-100 TRIG | **PC8 บน Morpho** | AF2, TIM3_CH3 PWM 12 µs ทุก 60 ms |
 | UART ไป PC | PA2 / USART2_TX | AF7 → ST-LINK Virtual COM, DMA1 Stream6 Channel4 |
@@ -66,6 +67,8 @@ US-100 ตัวที่ทดสอบใช้โหมด **ถอด jumper
 - ตอน sequence จบ ปุ่มความเร็วถูกพักไว้จน Reset; ADC, sensor, UART และ LDR ยังทำงาน
 
 ## LDR แบบ “มืดจัดจึงกลางคืน”
+
+รุ่นปัจจุบัน: C ใช้ไฟแดงสัมพันธ์กับ IDM และ LDR 3000 ส่วน Crash อยู่เฉพาะ Python (`road_board_io.py`) คำนวณ `gap - (v*0.1 + v*v/(2*7))` สมมติวัตถุอยู่นิ่ง หากขาดระยะเกิน 0.5 m ที่ความเร็ว >= 1 m/s ต่อเนื่อง 120 ms ตาม telemetry ใหม่ จะค้างภาพและแสดง CRASH จนกด Reset บนบอร์ด ไม่มีการส่งคำสั่งกลับหรือเปลี่ยนข้อมูลบนบอร์ด ข้อมูลซ้ำไม่เพิ่มการยืนยัน; fault/no echo/timeout ล้างการยืนยัน นี่เป็นการคาดการณ์ในเกม ไม่ใช่การตรวจพบแรงกระแทกจริง ใช้ RD1 เดิม
 
 ใช้การตัดสินแบบเปิด/ปิด ไม่มีการค่อย ๆ เปลี่ยนโหมดตามระดับแสง
 
@@ -110,6 +113,12 @@ US-100 ตัวที่ทดสอบใช้โหมด **ถอด jumper
 7. Build ก่อน flash ตรวจขาต่อและโหมด US-100 แล้วจึง flash โดยผู้ใช้ การทดสอบในงานนี้ **ไม่ได้แฟลชบอร์ด**
 
 `main()` นอนด้วย `__WFI()`; TIM4 interrupt ทุก 1 ms จัด debounce และเรียก application ทุก 10 ms, ADC EOC interrupt เก็บ LDR, TIM3 ใช้ hardware PWM/capture วัด US-100, UART ส่งด้วย DMA ทุก 50 ms ไม่มี polling รอ EOC/TXE/echo และไม่มี blocking delay ใน control loop
+
+ไฟสีฟ้า PA5 แสดงกลางคืนเหมือนเดิม ส่วนไฟแดง PA6/D12 คืนเป็นรุ่น IDM ที่ผู้ใช้ระบุ: `Road_DesiredGap()` คำนวณ `s* = s0 + max(0, v*T + v*closing/6.480740698)` (จำกัดพจน์ dynamic ไม่เกิน 100000 m ตามโค้ดเดิม) และใช้ผลเดียวกันกับการเร่ง–เบรกทุก 10 ms ขอบสว่างเต็มคือ s0 (กลางวัน 4 m / กลางคืน 7 m) ขอบดับคือ max(s*, s0 + ROAD_RED_MIN_SPAN_M) หารด้วย `ROAD_METRES_PER_SENSOR_MM` เพื่อแปลงกลับเป็นระยะเซนเซอร์ mm เก็บใน `red_near_mm`, `red_far_mm` และเป้าหมาย PWM `red_target_permille` ช่วงไฟจึงเปลี่ยนตามความเร็ว/อัตราเข้าใกล้/โหมดแสง จากดับไปเต็มใช้เวลา 500 ms เมื่อข้อมูลเซนเซอร์ผิด/เก่าหรือไม่มี Echo จะค่อย ๆ ดับ
+
+TIM2 สร้าง PWM ผ่าน interrupt บน GPIO เพราะ PA6 hardware PWM ใช้ TIM3_CH1 ซึ่งกำลังจับ Echo บน PC6 อยู่แล้ว ห้ามเปิด PA6 AF2 พร้อมกัน โปรเจกต์ CubeIDE ต้องมี `TIM2_IRQHandler` เพียงหนึ่งตัว ใช้ตัวใน `road_board.c` และลบตัวว่างชื่อซ้ำใน `stm32f4xx_it.c` ถ้ามี เมื่อคัดลอก config ให้คงค่า LDR ที่ปรับเทียบบนบอร์ดไว้และเพิ่มเฉพาะชุด `ROAD_RED_*`
+
+ทดสอบหลังแฟลช: ดู `g_road_output.desired_gap_m`, `red_near_mm`, `red_far_mm`, `red_target_permille` ใน debugger ขณะหยุดนิ่งกลางวัน near=80 mm, far=100 mm ตามช่วงขั้นต่ำ 1 m ในโลกจำลอง ที่กึ่งกลางขอบทั้งสองจะได้ PWM 50% เมื่อความเร็วสูงขึ้น far สามารถขยายได้ตามสมการ ใช้ Python และ RD1 เดิม ต้องตรวจไฟและจังหวะ interrupt บนบอร์ดจริง
 
 หากนำไปผสมกับโปรเจกต์ HAL เดิม ต้องปรับ ownership ของ peripheral, clock และ IRQ ให้ตรงกันก่อน ไม่ใช่คัดลอก `main.c` ทับแล้วเรียก initialization ทั้งสองชุด
 

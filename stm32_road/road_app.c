@@ -7,22 +7,53 @@ static float limit(float x, float low, float high)
 }
 static float magnitude(float x) { return (x < 0.0f) ? -x : x; }
 
-float Road_Idm(float speed, float target, float gap, float closing,
-               bool present, bool night)
+float Road_DesiredGap(float speed, float closing, bool night)
+{
+    float dynamic = speed * (night ? 1.8f : 1.0f)
+                  + speed * closing / 6.480740698f;
+    return (night ? 7.0f : 4.0f) + limit(dynamic, 0.0f, 100000.0f);
+}
+
+static float idm_with_desired(float speed, float target, float gap,
+                              bool present, float desired)
 {
     float interaction = 0.0f;
     if (target <= 0.0f) { return (speed > 0.0f) ? -3.0f : 0.0f; }
     if (present) {
-        /* sqrt(3.0 * 3.5) evaluated as a constant; delta = 4. */
-        float dynamic = speed * (night ? 1.8f : 1.0f)
-                      + speed * closing / 6.480740698f;
-        float desired = (night ? 7.0f : 4.0f) + limit(dynamic, 0.0f, 100000.0f);
         float ratio = desired / limit(gap, ROAD_MIN_GAP_M, ROAD_MAX_GAP_M);
         interaction = ratio * ratio;
     }
     float ratio = speed / target;
     float square = ratio * ratio;
     return limit(3.0f * (1.0f - square * square - interaction), -7.0f, 3.0f);
+}
+
+float Road_Idm(float speed, float target, float gap, float closing,
+               bool present, bool night)
+{
+    return idm_with_desired(speed, target, gap, present,
+                            Road_DesiredGap(speed, closing, night));
+}
+
+static void update_red_target(RoadApp *app, const RoadInputs *input, bool valid)
+{
+    /* near_m/far_m are FIXED reference distances, not app->out.desired_gap_m.
+     * desired_gap_m (IDM's s*) scales with speed; using it here made the LED
+     * brighten as the car sped up even when the real measured distance had
+     * not changed at all. The LED must react to distance_mm ONLY. */
+    float near_m = app->out.night ? 7.0f : 4.0f;
+    float far_m = ROAD_RED_FAR_M;
+    if (far_m < near_m + ROAD_RED_MIN_SPAN_M) {
+        far_m = near_m + ROAD_RED_MIN_SPAN_M;
+    }
+    app->out.red_near_mm = near_m / ROAD_METRES_PER_SENSOR_MM;
+    app->out.red_far_mm = far_m / ROAD_METRES_PER_SENSOR_MM;
+    app->out.red_target_permille = 0U;
+    if (valid && input->range_status == 0U) {
+        float level = (app->out.red_far_mm - (float)input->distance_mm)
+                    / (app->out.red_far_mm - app->out.red_near_mm);
+        app->out.red_target_permille = (uint32_t)(limit(level, 0.0f, 1.0f) * 1000.0f + 0.5f);
+    }
 }
 
 void RoadApp_Init(RoadApp *app)
@@ -50,8 +81,10 @@ static void reset_sequence(RoadApp *app)
 static void update_light(RoadApp *app, const RoadInputs *input)
 {
     uint32_t dark = ROAD_LDR_DARK_IS_HIGH ? input->ldr_adc : (4095U-input->ldr_adc);
-    bool crossing = app->out.night ? (dark <= ROAD_NIGHT_EXIT_ADC)
-                                  : (dark >= ROAD_NIGHT_ENTER_ADC);
+    /* Strict comparisons also support a single threshold: equality holds
+     * the current mode instead of alternately entering and exiting night. */
+    bool crossing = app->out.night ? (dark < ROAD_NIGHT_EXIT_ADC)
+                                  : (dark > ROAD_NIGHT_ENTER_ADC);
     app->light_ms = crossing ? app->light_ms + ROAD_TICK_MS : 0U;
     uint32_t dwell = app->out.night ? ROAD_NIGHT_EXIT_MS : ROAD_NIGHT_ENTER_MS;
     if (app->light_ms >= dwell) {
@@ -124,6 +157,10 @@ void RoadApp_Tick(RoadApp *app, const RoadInputs *input, uint32_t now_ms)
     app->previous_reset = input->reset_pressed;
     app->out.target_mps = limit(app->out.target_mps, 0.0f,
                                 (app->out.night ? 100.0f : 120.0f)/3.6f);
+    float old = app->out.speed_mps;
+    float closing = app->out.lead_valid ? -app->range_rate : old;
+    app->out.desired_gap_m = Road_DesiredGap(old, closing, app->out.night);
+    update_red_target(app, input, adc_ok && range_ok);
     if (app->out.fault || app->out.done || reset) {
         app->out.acceleration_mps2 = 0.0f;
         app->out.braking = false;
@@ -133,10 +170,8 @@ void RoadApp_Tick(RoadApp *app, const RoadInputs *input, uint32_t now_ms)
         }
         return; /* Freeze simulation on sensor fault; never assume free road. */
     }
-    float old = app->out.speed_mps;
-    float closing = app->out.lead_valid ? -app->range_rate : old;
-    app->out.acceleration_mps2 = Road_Idm(old, app->out.target_mps,
-                       app->out.gap_m, closing, app->out.present, app->out.night);
+    app->out.acceleration_mps2 = idm_with_desired(old, app->out.target_mps,
+                       app->out.gap_m, app->out.present, app->out.desired_gap_m);
     app->out.speed_mps = limit(old+app->out.acceleration_mps2*dt, 0.0f, 40.0f);
     app->out.odometer_m += (old+app->out.speed_mps)*0.5f*dt;
     if (app->out.odometer_m >= 4000000.0f) { app->out.odometer_m = 0.0f; }

@@ -1,7 +1,7 @@
 """PENCIL / DRIVE — board-only viewer; run with --port COM5.
 Requires: pip install ursina pyserial
 Keep road_board_io.py next to this file. No controls or IDM run on the PC.
-All values arrive from stm32_road firmware; see stm32_road/README.md.
+Driving values arrive from firmware; crash presentation runs only on the PC.
 """
 import argparse
 import math
@@ -250,6 +250,7 @@ void main() {
     banner_border=Entity(parent=camera.ui,model='quad',position=(0,.04,-.09),scale=(.846,.216),color=ink)
     headline=label('BREAK!!',(0,.088),3.8,origin=(0,0),z=-.12)
     reason=label('',(0,-.005),.76,origin=(0,0),z=-.12)
+    physics_warn=label('',(0,-.18),.9,origin=(0,0),z=-.12)
 
     def update_frame():
         raw_dt=max(time.dt,0)
@@ -306,7 +307,17 @@ void main() {
         for lamp in lamps:
             lamp.color=ink if sim.braking else grey(.65)
         banner.enabled=banner_border.enabled=headline.enabled=reason.enabled=bool(sim.done and sim.connected)
-        reason.text=sim.reason+'\nPRESS PHYSICAL RESET ON BOARD'
+        crashed=sim.crashed
+        headline.text='CRASH!' if crashed else 'BRAKE!'
+        headline.color=color.red if crashed else ink
+        reason.text=('An accident occurred (simulation)' if crashed else sim.reason)+'\nPRESS PHYSICAL RESET ON BOARD'
+        margin=sim.stop_margin_m
+        physics_warn.enabled=bool(fresh and margin is not None and
+                                  (crashed or (not sim.done and not sim.packet.fault)))
+        if margin is not None:
+            physics_warn.text=(f'CANNOT STOP - SHORT BY {-margin:.1f} m' if margin<0
+                               else f'STOPPING MARGIN +{margin:.1f} m')
+            physics_warn.color=color.red if margin<0 else color.lime
 
     Entity(update=update_frame)
     app.run()

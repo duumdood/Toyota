@@ -57,7 +57,16 @@ def factory(**kw):
         receiver.set(done=True,done_reason=1,speed_mps=0,braking=False,board_ms=200)
         tick();assert env['banner'].enabled
         capture('preview_board_stop.png')
-        receiver.set(done=False,done_reason=0,reset_id=1,board_ms=250)
+        for n in range(4):
+            receiver.set(sequence=10+n,board_ms=300+n*50,reset_id=1,
+                         done=False,done_reason=0,speed_mps=60/3.6,
+                         gap_m=5,distance_mm=100)
+            tick()
+        assert env['headline'].text=='CRASH!' and env['physics_warn'].enabled
+        assert '16.5' in env['physics_warn'].text
+        assert not receiver.p.done and receiver.p.speed_mps==60/3.6
+        capture('preview_board_crash.png')
+        receiver.set(sequence=20,done=False,done_reason=0,reset_id=2,board_ms=500)
         tick();assert not env['banner'].enabled
         receiver.live=False
         before=env['sim'].odometer

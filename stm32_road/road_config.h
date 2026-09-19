@@ -17,8 +17,8 @@
  * Watch g_road_inputs.ldr_adc in debugger; tune after measuring room/covered.
  * These thresholds act on dark_score (raw, or 4095-raw), NOT lux. */
 #define ROAD_LDR_DARK_IS_HIGH    1U
-#define ROAD_NIGHT_ENTER_ADC     3800U
-#define ROAD_NIGHT_EXIT_ADC      3500U
+#define ROAD_NIGHT_ENTER_ADC     3000U
+#define ROAD_NIGHT_EXIT_ADC      3000U
 #define ROAD_NIGHT_ENTER_MS      400U
 #define ROAD_NIGHT_EXIT_MS       200U
 #define ROAD_SENSOR_STALE_MS     250U
@@ -34,7 +34,20 @@
 #define ROAD_ECHO_MIN_US         100U
 #define ROAD_ECHO_MAX_US         26000U
 
-#if ROAD_NIGHT_ENTER_ADC <= ROAD_NIGHT_EXIT_ADC
-#error "Night entry must be darker than night exit"
+/* Red LED brightness ramps purely against the REAL measured US-100 distance.
+ * red_near_mm/red_far_mm are FIXED reference points, never derived from
+ * speed or the IDM's dynamic desired gap -- brightness must not move just
+ * because the car sped up while the object's real distance stayed put. */
+#define ROAD_RED_FAR_M           12.0f /* fixed far edge: LED fully off here */
+#define ROAD_RED_MIN_SPAN_M      1.0f /* minimum fade band in road metres */
+#define ROAD_RED_PWM_PERIOD_US   1000U
+#define ROAD_RED_FADE_MS         500U /* full off-to-on ramp duration */
+
+#if ROAD_RED_FADE_MS < ROAD_TICK_MS || ROAD_RED_FADE_MS > (ROAD_RED_PWM_PERIOD_US * ROAD_TICK_MS)
+#error "Red LED fade duration is outside supported range"
+#endif
+
+#if ROAD_NIGHT_ENTER_ADC < ROAD_NIGHT_EXIT_ADC
+#error "Night entry must be at least as dark as night exit"
 #endif
 #endif

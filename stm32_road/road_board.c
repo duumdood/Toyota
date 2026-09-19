@@ -1,6 +1,6 @@
 /* Bare-metal CMSIS register style, following lectures 0100 / 0300 / 0400 /
  * 0500. No HAL, no peripheral busy-wait loops, no ADC/UART polling.
- * Owns ADC1, USART2, DMA1 Stream6, TIM3, TIM4 and EXTI3/4/10 exclusively.
+ * Owns ADC1, USART2, DMA1 Stream6, TIM2/3/4 and EXTI3/4/10 exclusively.
  * Clock assumption: RESET HSI 16 MHz, all bus prescalers /1. */
 #ifndef STM32F411xE
 #define STM32F411xE
@@ -23,6 +23,7 @@ static volatile bool adc_busy;
 static uint32_t packet_sequence;
 static bool waiting_echo, saw_rise;
 static uint32_t echo_rise;
+static volatile uint32_t red_duty_us;
 typedef struct { bool pending; uint32_t edge_ms; } ButtonEdge;
 static volatile ButtonEdge buttons[3];
 
@@ -32,6 +33,7 @@ void EXTI4_IRQHandler(void);
 void EXTI15_10_IRQHandler(void);
 void ADC_IRQHandler(void);
 void TIM3_IRQHandler(void);
+void TIM2_IRQHandler(void);
 void TIM4_IRQHandler(void);
 void DMA1_Stream6_IRQHandler(void);
 
@@ -140,6 +142,44 @@ void DMA1_Stream6_IRQHandler(void)
         tx_busy = false;
     }
 }
+/* PA6 hardware PWM would share TIM3_CH1 with PC6 echo capture. Use a
+ * separate timer's update/compare IRQs to drive PA6 as GPIO instead.
+ * At most 2000 short IRQs/s; no delay loops and no peripheral polling. */
+void TIM2_IRQHandler(void)
+{
+    uint32_t status = TIM2->SR;
+    TIM2->SR = ~status;
+    if ((status & TIM_SR_UIF) != 0U) {
+        uint32_t duty = red_duty_us;
+        TIM2->CCR1 = duty;
+        /* Ignore a stale compare from the previous period. If delayed beyond
+         * this pulse, leave the LED off instead of stretching the pulse. */
+        TIM2->SR = ~TIM_SR_CC1IF;
+        if (duty == ROAD_RED_PWM_PERIOD_US || TIM2->CNT < duty) {
+            GPIOA->BSRR = 1U << 6U;
+        } else {
+            GPIOA->BSRR = 1U << 22U;
+        }
+    } else if ((status & TIM_SR_CC1IF) != 0U) {
+        GPIOA->BSRR = 1U << 22U;
+    }
+}
+
+static void update_red_led(void)
+{
+    uint32_t target = (app.out.red_target_permille * ROAD_RED_PWM_PERIOD_US) / 1000U;
+    /* Slew limit avoids visible jumps, including when echo disappears.
+     * Only this function writes the duty; TIM2 reads one aligned word. */
+    uint32_t duty = red_duty_us;
+    uint32_t step = (ROAD_RED_PWM_PERIOD_US * ROAD_TICK_MS) / ROAD_RED_FADE_MS;
+    if (target > duty) {
+        duty += ((target - duty) > step) ? step : (target - duty);
+    } else {
+        duty -= ((duty - target) > step) ? step : (duty - target);
+    }
+    red_duty_us = duty;
+}
+
 static void transmit(const RoadInputs *snapshot)
 {
     /* Never change storage still owned by DMA. Dropping a whole telemetry
@@ -172,6 +212,7 @@ void TIM4_IRQHandler(void)
         RoadApp_Tick(&app, &snapshot, g_road_ms);
         g_road_output = app.out;
         GPIOA->BSRR = app.out.night ? (1U<<5U) : (1U<<21U);
+        update_red_led();
         if ((g_road_ms % ROAD_TELEMETRY_MS) == 0U) { transmit(&snapshot); }
         if (!adc_busy) { adc_busy = true; ADC1->CR2 |= ADC_CR2_SWSTART; }
     }
@@ -180,7 +221,7 @@ void RoadBoard_Init(void)
 {
     RoadApp_Init(&app);
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN | RCC_AHB1ENR_DMA1EN;
-    RCC->APB1ENR |= RCC_APB1ENR_USART2EN | RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM4EN;
+    RCC->APB1ENR |= RCC_APB1ENR_USART2EN | RCC_APB1ENR_TIM2EN | RCC_APB1ENR_TIM3EN | RCC_APB1ENR_TIM4EN;
     RCC->APB2ENR |= RCC_APB2ENR_ADC1EN | RCC_APB2ENR_SYSCFGEN;
     (void)RCC->APB2ENR; /* clock-enable propagation */
 
@@ -202,6 +243,21 @@ void RoadBoard_Init(void)
     GPIOA->MODER = (GPIOA->MODER & ~(3U<<10U)) | (1U<<10U); /* PA5 LED */
     GPIOA->OTYPER &= ~(1U<<5U);
     GPIOA->BSRR = 1U<<21U;
+    /* Shield red LED PA6/D12, active high. Blue PA5 remains independent. */
+    GPIOA->BSRR = 1U << 22U;
+    GPIOA->MODER = (GPIOA->MODER & ~(3U << 12U)) | (1U << 12U);
+    GPIOA->OTYPER &= ~(1U << 6U);
+    GPIOA->PUPDR &= ~(3U << 12U);
+    red_duty_us = 0U;
+    TIM2->CR1 = 0U;
+    TIM2->PSC = ROAD_CLOCK_HZ / 1000000U - 1U;
+    TIM2->ARR = ROAD_RED_PWM_PERIOD_US - 1U;
+    TIM2->CCMR1 = 0U; /* Compare without pin output or CCR preload. */
+    TIM2->CCER = 0U;
+    TIM2->CCR1 = 0U;
+    TIM2->EGR = TIM_EGR_UG;
+    TIM2->SR = 0U;
+    TIM2->DIER = TIM_DIER_UIE | TIM_DIER_CC1IE;
     GPIOA->MODER |= 3U<<2U; /* PA1 analog */
     GPIOA->PUPDR &= ~(3U<<2U);
     ADC->CCR &= ~ADC_CCR_ADCPRE; /* PCLK2/2 = 8 MHz */
@@ -255,6 +311,7 @@ void RoadBoard_Init(void)
     TIM4->DIER = TIM_DIER_UIE;
     NVIC_SetPriorityGrouping(0U);
     NVIC_SetPriority(TIM3_IRQn,0U);
+    NVIC_SetPriority(TIM2_IRQn,2U);
     NVIC_SetPriority(ADC_IRQn,1U);
     NVIC_SetPriority(EXTI3_IRQn,1U);
     NVIC_SetPriority(EXTI4_IRQn,1U);
@@ -264,6 +321,8 @@ void RoadBoard_Init(void)
     NVIC_EnableIRQ(TIM3_IRQn); NVIC_EnableIRQ(ADC_IRQn);
     NVIC_EnableIRQ(EXTI3_IRQn); NVIC_EnableIRQ(EXTI4_IRQn); NVIC_EnableIRQ(EXTI15_10_IRQn);
     NVIC_EnableIRQ(DMA1_Stream6_IRQn); NVIC_EnableIRQ(TIM4_IRQn);
+    NVIC_EnableIRQ(TIM2_IRQn);
+    TIM2->CR1 = TIM_CR1_CEN;
     TIM3->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
     TIM4->CR1 = TIM_CR1_CEN;
 }

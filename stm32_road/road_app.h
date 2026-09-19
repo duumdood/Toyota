@@ -23,6 +23,9 @@ typedef struct {
 typedef struct {
     float speed_mps, target_mps, acceleration_mps2, odometer_m;
     float gap_m, lead_speed_mps;
+    /* Local LED diagnostics; the RD1 wire format stays unchanged. */
+    float desired_gap_m, red_near_mm, red_far_mm;
+    uint32_t red_target_permille;
     bool night, present, lead_valid, braking, done, fault;
     uint8_t done_reason; /* 0=running, 1=stop complete, 2=deceleration complete */
     uint32_t reset_id;
@@ -40,4 +43,5 @@ void RoadApp_Init(RoadApp *app);
 void RoadApp_Tick(RoadApp *app, const RoadInputs *input, uint32_t now_ms);
 float Road_Idm(float speed, float target, float gap, float closing,
                bool present, bool night);
+float Road_DesiredGap(float speed, float closing, bool night);
 #endif

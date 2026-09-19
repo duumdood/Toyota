@@ -2,7 +2,7 @@
 
 BOARD INPUT VARIABLES are the named fields in BoardTelemetry below. C produces
 ALL control results (IDM, speed, lead estimate, light mode, brake, reset).
-Only SI unit conversion and render interpolation happen on this side.
+Crash prediction is a PC-only presentation; it never modifies board telemetry.
 Wire contract and pin/calibration instructions: stm32_road/README.md.
 """
 from dataclasses import dataclass
@@ -16,6 +16,19 @@ SERIAL_BAUD = 115200
 LINK_TIMEOUT_S = 0.5
 MAX_FRAME_BYTES = 240
 RECONNECT_DELAY_S = 1.0
+STOP_REACTION_S = 0.1
+STOP_MAX_BRAKE_MPS2 = 7.0
+CRASH_DEFICIT_M = 0.5
+CRASH_MIN_SPEED_MPS = 1.0
+CRASH_CONFIRM_MS = 120
+CRASH_MAX_PACKET_GAP_MS = 150
+
+
+def stopping_margin(speed_mps, gap_m):
+    """Stationary-obstacle display model, not a command to the board."""
+    if gap_m is None:
+        return None
+    return gap_m - (speed_mps * STOP_REACTION_S + speed_mps**2 / (2 * STOP_MAX_BRAKE_MPS2))
 
 
 @dataclass(frozen=True)
@@ -191,6 +204,43 @@ class BoardView:
         self.last_received = None
         self.origin_odo = self.origin_gap = 0.0
         self.blend_duration = .05
+        self.crashed = False
+        self.stop_margin_m = None
+        self._crash_started_ms = None
+        self._crash_last_packet = None
+        self._crash_pose = None
+
+    def _update_crash_display(self, packet):
+        previous = self._crash_last_packet
+        restarted = previous is not None and (
+            packet.reset_id != previous.reset_id or
+            (packet.board_ms < previous.board_ms and packet.sequence < previous.sequence))
+        if restarted:
+            self.crashed = False
+            self._crash_pose = None
+            self._crash_started_ms = None
+            self.stop_margin_m = None
+        if previous is not None and not restarted:
+            if packet.sequence == previous.sequence:
+                return
+            if ((packet.board_ms - previous.board_ms) & 0xFFFFFFFF) > CRASH_MAX_PACKET_GAP_MS:
+                self._crash_started_ms = None
+        self._crash_last_packet = packet
+        if self.crashed:
+            return
+        valid = (not packet.fault and not packet.done and
+                 packet.range_status == 0 and packet.gap_m is not None)
+        self.stop_margin_m = stopping_margin(packet.speed_mps, packet.gap_m) if valid else None
+        unsafe = (self.stop_margin_m is not None and
+                  self.stop_margin_m < -CRASH_DEFICIT_M and
+                  packet.speed_mps >= CRASH_MIN_SPEED_MPS)
+        if not unsafe:
+            self._crash_started_ms = None
+        elif self._crash_started_ms is None:
+            self._crash_started_ms = packet.board_ms
+        elif ((packet.board_ms - self._crash_started_ms) & 0xFFFFFFFF) >= CRASH_CONFIRM_MS:
+            self.crashed = True
+            self._crash_pose = (packet.odometer_m, packet.gap_m or 100.0)
 
     def refresh(self, receiver, now=None):
         now = time.monotonic() if now is None else now
@@ -200,6 +250,7 @@ class BoardView:
             'TELEMETRY TIMEOUT' if received is not None else message)
         self.connected = live
         if not live:
+            self._crash_started_ms = None
             return
         if received != self.last_received or packet is not self.packet:
             previous = self.packet
@@ -212,6 +263,7 @@ class BoardView:
             self.origin_gap = self.gap if continuous and self.present and packet.gap_m is not None else (packet.gap_m or 100)
             self.blend_duration = min(.15, max(.01, (packet.board_ms-previous.board_ms)/1000)) if continuous else .05
             self.last_received, self.packet = received, packet
+            self._update_crash_display(packet)
             self.speed, self.target = packet.speed_mps, packet.target_mps
             self.acceleration, self.lead_speed = packet.acceleration_mps2, packet.lead_speed_mps
             self.night, self.present, self.done = packet.night, packet.gap_m is not None, packet.done
@@ -222,3 +274,10 @@ class BoardView:
             alpha = 1.0
         self.odometer = self.origin_odo+(packet.odometer_m-self.origin_odo)*alpha
         self.gap = self.origin_gap+((packet.gap_m or 100)-self.origin_gap)*alpha
+        if self.crashed:
+            # Freeze only presentation. The MCU continues driving its own outputs.
+            self.done = True
+            self.reason = 'SIMULATED ACCIDENT'
+            self.speed = self.acceleration = 0.0
+            self.braking = False
+            self.odometer, self.gap = self._crash_pose
