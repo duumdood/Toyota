@@ -22,6 +22,15 @@ CRASH_DEFICIT_M = 0.5
 CRASH_MIN_SPEED_MPS = 1.0
 CRASH_CONFIRM_MS = 120
 CRASH_MAX_PACKET_GAP_MS = 150
+VISUAL_METRES_PER_SENSOR_MM = 0.1  # 1 real cm = 1 visual metre.
+LEAD_VISIBLE_MAX_M = 80.0
+
+
+def visual_gap(packet):
+    """Unclamped visual distance; board gap remains authoritative for control."""
+    if packet is None or packet.range_status != 0 or packet.distance_mm is None:
+        return None
+    return packet.distance_mm * VISUAL_METRES_PER_SENSOR_MM
 
 
 def stopping_margin(speed_mps, gap_m):
@@ -50,6 +59,7 @@ class BoardTelemetry:
     reset_id: int           # INPUT: physical reset counter
     done_reason: int        # INPUT: 0 running / 1 stopped / 2 settled
     range_status: int       # INPUT: 0 echo / 1 no return / 2 invalid or not ready
+    accel_blocked: bool = False  # INPUT: board flag bit 6; warning only.
 
 
 def parse_frame(line: bytes) -> BoardTelemetry:
@@ -71,7 +81,7 @@ def parse_frame(line: bytes) -> BoardTelemetry:
         if not 0 <= value <= 0xFFFFFFFF:
             raise ValueError('uint32 out of range')
     if not (0 <= v <= 40000 and 0 <= target <= 33334 and -7001 <= acc <= 3001
-            and -80000 <= lead <= 120000 and 0 <= flags <= 63 and 0 <= ldr <= 4095
+            and -80000 <= lead <= 120000 and 0 <= flags <= 127 and 0 <= ldr <= 4095
             and 0 <= reason <= 2 and 0 <= status <= 2 and (mm == -1 or 1 <= mm <= 5000)):
         raise ValueError('telemetry outside physical/protocol bounds')
     present, valid = bool(flags & 2), bool(flags & 4)
@@ -86,7 +96,7 @@ def parse_frame(line: bytes) -> BoardTelemetry:
     return BoardTelemetry(seq, ms, v/1000, target/1000, acc/1000, odo/1000,
         gap/1000 if present else None, lead/1000 if valid else None,
         bool(flags & 1), bool(flags & 8), bool(flags & 16), bool(flags & 32),
-        ldr, mm if mm >= 0 else None, reset, reason, status)
+        ldr, mm if mm >= 0 else None, reset, reason, status, bool(flags & 64))
 
 
 class LineDecoder:
@@ -209,6 +219,11 @@ class BoardView:
         self._crash_started_ms = None
         self._crash_last_packet = None
         self._crash_pose = None
+        self.result_packet = None
+        self.result_is_crash = False
+        self.scene_gap_m = None
+        self.scene_visible = False
+        self._scene_origin = None
 
     def _update_crash_display(self, packet):
         previous = self._crash_last_packet
@@ -216,6 +231,8 @@ class BoardView:
             packet.reset_id != previous.reset_id or
             (packet.board_ms < previous.board_ms and packet.sequence < previous.sequence))
         if restarted:
+            self.result_packet = None
+            self.result_is_crash = False
             self.crashed = False
             self._crash_pose = None
             self._crash_started_ms = None
@@ -251,6 +268,7 @@ class BoardView:
         self.connected = live
         if not live:
             self._crash_started_ms = None
+            self.scene_visible = False
             return
         if received != self.last_received or packet is not self.packet:
             previous = self.packet
@@ -262,8 +280,18 @@ class BoardView:
             self.origin_odo = self.odometer if continuous else packet.odometer_m
             self.origin_gap = self.gap if continuous and self.present and packet.gap_m is not None else (packet.gap_m or 100)
             self.blend_duration = min(.15, max(.01, (packet.board_ms-previous.board_ms)/1000)) if continuous else .05
+            raw_gap = visual_gap(packet)
+            # Snap when a target enters visibility; never slide it from an old
+            # close target or from beyond the visibility boundary.
+            self._scene_origin = (self.scene_gap_m if continuous and self.scene_visible
+                                  and raw_gap is not None and raw_gap <= LEAD_VISIBLE_MAX_M
+                                  else raw_gap)
             self.last_received, self.packet = received, packet
             self._update_crash_display(packet)
+            if self.result_packet is None and (self.crashed or packet.done):
+                # Immutable raw board values at sequence end, before visual freeze.
+                self.result_packet = packet
+                self.result_is_crash = self.crashed
             self.speed, self.target = packet.speed_mps, packet.target_mps
             self.acceleration, self.lead_speed = packet.acceleration_mps2, packet.lead_speed_mps
             self.night, self.present, self.done = packet.night, packet.gap_m is not None, packet.done
@@ -281,3 +309,10 @@ class BoardView:
             self.speed = self.acceleration = 0.0
             self.braking = False
             self.odometer, self.gap = self._crash_pose
+        display_packet = self.result_packet if self.done and self.result_packet else packet
+        raw_gap = visual_gap(display_packet)
+        self.scene_gap_m = raw_gap
+        if raw_gap is not None and self._scene_origin is not None and not self.done:
+            self.scene_gap_m = self._scene_origin + (raw_gap-self._scene_origin)*alpha
+        self.scene_visible = bool(not packet.fault and raw_gap is not None
+                                  and raw_gap <= LEAD_VISIBLE_MAX_M)

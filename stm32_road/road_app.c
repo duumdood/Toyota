@@ -37,17 +37,9 @@ float Road_Idm(float speed, float target, float gap, float closing,
 
 static void update_red_target(RoadApp *app, const RoadInputs *input, bool valid)
 {
-    /* near_m/far_m are FIXED reference distances, not app->out.desired_gap_m.
-     * desired_gap_m (IDM's s*) scales with speed; using it here made the LED
-     * brighten as the car sped up even when the real measured distance had
-     * not changed at all. The LED must react to distance_mm ONLY. */
-    float near_m = app->out.night ? 7.0f : 4.0f;
-    float far_m = ROAD_RED_FAR_M;
-    if (far_m < near_m + ROAD_RED_MIN_SPAN_M) {
-        far_m = near_m + ROAD_RED_MIN_SPAN_M;
-    }
-    app->out.red_near_mm = near_m / ROAD_METRES_PER_SENSOR_MM;
-    app->out.red_far_mm = far_m / ROAD_METRES_PER_SENSOR_MM;
+    /* Physical LED calibration is independent of the simulator distance scale. */
+    app->out.red_near_mm = app->out.night ? ROAD_RED_NEAR_NIGHT_MM : ROAD_RED_NEAR_DAY_MM;
+    app->out.red_far_mm = ROAD_RED_FAR_MM;
     app->out.red_target_permille = 0U;
     if (valid && input->range_status == 0U) {
         float level = (app->out.red_far_mm - (float)input->distance_mm)
@@ -162,6 +154,8 @@ void RoadApp_Tick(RoadApp *app, const RoadInputs *input, uint32_t now_ms)
     app->out.desired_gap_m = Road_DesiredGap(old, closing, app->out.night);
     update_red_target(app, input, adc_ok && range_ok);
     if (app->out.fault || app->out.done || reset) {
+        app->out.accel_blocked = false;
+        app->accel_request_mps = 0.0f;
         app->out.acceleration_mps2 = 0.0f;
         app->out.braking = false;
         if (app->out.fault) {
@@ -172,21 +166,55 @@ void RoadApp_Tick(RoadApp *app, const RoadInputs *input, uint32_t now_ms)
     }
     app->out.acceleration_mps2 = idm_with_desired(old, app->out.target_mps,
                        app->out.gap_m, app->out.present, app->out.desired_gap_m);
+    /* Compare with free-road IDM so the warning is attributable to the leader,
+     * not merely to approaching the cruise target or the night speed cap.
+     * This is diagnostic only; target, acceleration and LED logic are unchanged. */
+    float free_accel = idm_with_desired(old, app->out.target_mps,
+                          app->out.gap_m, false, app->out.desired_gap_m);
+    float requested = app->out.target_mps;
+    if (app->out.accel_blocked && app->accel_request_mps > requested) {
+        requested = app->accel_request_mps;
+    }
+    requested = limit(requested, 0.0f, (app->out.night ? 100.0f : 120.0f)/3.6f);
+    float requested_accel = idm_with_desired(old, requested, app->out.gap_m,
+                                            app->out.present, app->out.desired_gap_m);
+    float requested_free = idm_with_desired(old, requested, app->out.gap_m,
+                                           false, app->out.desired_gap_m);
+    bool obstacle_blocks = app->out.present && requested > old + 0.05f
+                         && requested_accel <= 0.05f && requested_free > 0.05f;
+    if (!obstacle_blocks) {
+        app->out.accel_blocked = false;
+        app->accel_request_mps = 0.0f;
+    } else if (input->speed_up_pressed && !input->speed_down_pressed) {
+        /* Latch after an attempted increase, even when the button is released.
+         * Clear when the lead no longer prevents acceleration or data is invalid. */
+        app->out.accel_blocked = true;
+        app->accel_request_mps = requested;
+    }
     app->out.speed_mps = limit(old+app->out.acceleration_mps2*dt, 0.0f, 40.0f);
     app->out.odometer_m += (old+app->out.speed_mps)*0.5f*dt;
     if (app->out.odometer_m >= 4000000.0f) { app->out.odometer_m = 0.0f; }
     app->out.lead_speed_mps = app->out.speed_mps + app->range_rate;
     app->out.braking = app->out.acceleration_mps2 < -0.35f;
+    /* Follow actual speed when the lead contributes to automatic braking.
+     * Never raise cruise automatically; speed+ is required after the road clears. */
+    if (app->out.present && app->out.braking &&
+        free_accel > app->out.acceleration_mps2 + 0.05f &&
+        app->out.target_mps > app->out.speed_mps) {
+        app->out.target_mps = app->out.speed_mps;
+    }
     if (app->out.present && app->out.braking) { app->did_brake = true; }
     bool stable = app->out.present && app->did_brake && app->out.lead_valid
                && magnitude(app->range_rate)<0.5f && magnitude(app->out.acceleration_mps2)<0.4f;
     app->settled_s = stable ? app->settled_s+dt : 0.0f;
     if (app->out.present && app->did_brake && app->out.speed_mps < 0.3f) {
         app->out.speed_mps = 0.0f;
+        app->out.target_mps = 0.0f;
         app->out.done = true;
         app->out.done_reason = 1U;
     } else if (app->settled_s > 1.2f) {
         app->out.done = true;
         app->out.done_reason = 2U;
     }
+    if (app->out.done) { app->out.accel_blocked = false; }
 }

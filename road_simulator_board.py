@@ -6,7 +6,7 @@ Driving values arrive from firmware; crash presentation runs only on the PC.
 import argparse
 import math
 import random
-from road_board_io import BoardView, SerialReceiver, SERIAL_PORT, SERIAL_BAUD
+from road_board_io import BoardView, SerialReceiver, SERIAL_PORT, SERIAL_BAUD, visual_gap, LEAD_VISIBLE_MAX_M
 
 def clamp(x, low, high):
     return max(low, min(high, x))
@@ -207,7 +207,7 @@ void main() {
     speed=label('',(0,.39),4.3,origin=(0,0))
     unit=label('K M / H',(0,.32),.67,origin=(0,0))
     mode=label('',(.74,.456),.7,origin=(.5,0))
-    target=label('',(-.75,-.34),.85)
+    target=label('',(.34,.38),1.25,origin=(0,0))
     lead_tag=label('',(0,0),.78,origin=(0,0))
     lead_badge=Entity(parent=camera.ui,model='quad',scale=(.30,.031),color=paper,z=-.005)
     telemetry=label('',(-.75,-.377),.70)
@@ -246,11 +246,19 @@ void main() {
         for text in (brand,subtitle,speed,unit,mode,target,telemetry,hint,scale_note):
             text.color=color.rgb32(242,244,249) if sim.night else ink
 
-    banner=Entity(parent=camera.ui,model='quad',position=(0,.04,-.10),scale=(.84,.21),color=paper)
-    banner_border=Entity(parent=camera.ui,model='quad',position=(0,.04,-.09),scale=(.846,.216),color=ink)
-    headline=label('BREAK!!',(0,.088),3.8,origin=(0,0),z=-.12)
-    reason=label('',(0,-.005),.76,origin=(0,0),z=-.12)
-    physics_warn=label('',(0,-.18),.9,origin=(0,0),z=-.12)
+    banner=Entity(parent=camera.ui,model='quad',position=(0,.02,-.10),scale=(.94,.34),color=paper)
+    banner_border=Entity(parent=camera.ui,model='quad',position=(0,.02,-.09),scale=(.946,.346),color=ink)
+    headline=label('BRAKE!',(0,.13),3.0,origin=(0,0),z=-.12)
+    reason=label('',(0,.055),.70,origin=(0,0),z=-.12)
+    result_text=label('',(0,-.035),.78,origin=(0,0),z=-.12)
+    physics_warn=label('',(0,-.205),.9,origin=(0,0),z=-.12)
+    accel_notice=Entity(parent=camera.ui,enabled=False)
+    Entity(parent=accel_notice,model='quad',position=(0,.04,-.10),
+           scale=(.94,.22),color=color.rgb32(255,234,180))
+    Text(parent=accel_notice,text='CANNOT ACCELERATE',
+         position=(0,.085,-.12),origin=(0,0),scale=1.7,color=ink)
+    Text(parent=accel_notice,text='CAR AHEAD\nWaiting for room to accelerate',
+         position=(0,.015,-.12),origin=(0,0),scale=.85,color=ink)
 
     def update_frame():
         raw_dt=max(time.dt,0)
@@ -279,41 +287,57 @@ void main() {
             p,h=pose((city_base+i)*22,lateral)
             obj.position=p
             obj.rotation_y=h
-        lead.enabled=sim.present
-        if sim.present:
-            p,h=pose(sim.odometer+sim.gap+3.6)
+        lead.enabled=sim.scene_visible
+        if sim.scene_visible:
+            p,h=pose(sim.odometer+sim.scene_gap_m+3.6)
             lead.position=p
             lead.rotation_y=h
         fresh=sim.connected
         speed.text=f'{sim.speed*3.6:.0f}' if fresh else '--'
-        target.text=f'CRUISE / {sim.target*3.6:.0f} km/h' if fresh else 'CRUISE / --'
+        target.text=f'CRUISE\n{sim.target*3.6:.0f} km/h' if fresh else 'CRUISE\n--'
         mode.text=('NIGHT / 100' if sim.night else 'DAY / 120') if fresh else 'MODE / --'
-        range_text.text=(f'{sim.packet.gap_m:.1f} m' if sim.present else 'NO TARGET') if fresh else '--'
+        measured_gap=visual_gap(sim.packet) if fresh else None
+        range_text.text=(f'{measured_gap:.1f} m' if measured_gap is not None else 'NO TARGET') if fresh else '--'
         sensor_text.text=(f'{sim.packet.distance_mm/10:.1f} cm measured' if sim.packet.distance_mm is not None else 'NO ECHO') if fresh else 'NO DATA'
         ldr_text.text=f'ADC {sim.packet.ldr_adc}' if fresh else 'ADC --'
         range_state.text={0:'VALID ECHO',1:'NO RETURN',2:'CHECK SENSOR'}[sim.packet.range_status] if fresh else 'WAITING'
+        if fresh and measured_gap is not None and measured_gap > LEAD_VISIBLE_MAX_M:
+            range_state.text='OUTSIDE VIEW (>80 m)'
         telemetry.text='BRAKING' if fresh and sim.braking and not sim.done else ''
+        accel_notice.enabled=bool(fresh and sim.packet.accel_blocked and
+                                  not sim.packet.fault and not sim.done and not popup.enabled)
         link_status.text=sim.status
         link_status.color=ink
         base=ShowBaseGlobal.base
         projected=Point2()
         visible=base.cam.node().get_lens().project(base.cam.getRelativePoint(scene,Point3(lead.x,2.5,lead.z)),projected)
-        lead_tag.enabled=bool(sim.connected and sim.present and not sim.done and visible and abs(projected.x)<.68 and abs(projected.y)<.75)
+        lead_tag.enabled=bool(sim.connected and sim.scene_visible and not sim.done and visible and abs(projected.x)<.68 and abs(projected.y)<.75)
         lead_tag.position=(projected.x*camera.aspect_ratio/2,projected.y/2,-.015)
         lead_badge.enabled=lead_tag.enabled
         lead_badge.position=(lead_tag.x,lead_tag.y,-.005)
         estimate='EST --' if sim.lead_speed is None else f'EST {sim.lead_speed*3.6:.0f} km/h'
-        lead_tag.text=f'{estimate}  /  {sim.gap:.1f} m'
+        lead_tag.text=f'{estimate}  /  {sim.scene_gap_m:.1f} m' if sim.scene_gap_m is not None else ''
         for lamp in lamps:
-            lamp.color=ink if sim.braking else grey(.65)
+            lamp.color=color.rgb32(255,25,25) if sim.braking else color.rgb32(90,15,15)
         banner.enabled=banner_border.enabled=headline.enabled=reason.enabled=bool(sim.done and sim.connected)
         crashed=sim.crashed
         headline.text='CRASH!' if crashed else 'BRAKE!'
         headline.color=color.red if crashed else ink
         reason.text=('An accident occurred (simulation)' if crashed else sim.reason)+'\nPRESS PHYSICAL RESET ON BOARD'
+        result_text.enabled=bool(sim.done and sim.connected and sim.result_packet)
+        if result_text.enabled:
+            result=sim.result_packet
+            if sim.result_is_crash:
+                result_text.text=f'Speed at crash: {result.speed_mps*3.6:.1f} km/h'
+            else:
+                lead_final='unknown' if result.lead_speed_mps is None else f'{result.lead_speed_mps*3.6:.1f} km/h (est.)'
+                gap_final='no target' if result.gap_m is None else f'{result.gap_m:.2f} m'
+                result_text.text=(f'At sequence end: ego {result.speed_mps*3.6:.1f} km/h\n'
+                                  f'Lead: {lead_final} | Gap: {gap_final}\n'
+                                  f'Road position: {result.odometer_m:.1f} m')
         margin=sim.stop_margin_m
         physics_warn.enabled=bool(fresh and margin is not None and
-                                  (crashed or (not sim.done and not sim.packet.fault)))
+                                  not sim.done and not sim.packet.fault)
         if margin is not None:
             physics_warn.text=(f'CANNOT STOP - SHORT BY {-margin:.1f} m' if margin<0
                                else f'STOPPING MARGIN +{margin:.1f} m')

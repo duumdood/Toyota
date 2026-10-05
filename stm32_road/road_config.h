@@ -23,11 +23,11 @@
 #define ROAD_NIGHT_EXIT_MS       200U
 #define ROAD_SENSOR_STALE_MS     250U
 
-/* Preserve mock visual scale: 10 mm measured = 0.5 m of road.
+/* Desktop demo: 10 mm measured = 1 m of road; 70 cm covers the full scene.
  * Physical distance stays separately available as distance_mm. */
-#define ROAD_METRES_PER_SENSOR_MM 0.05f
+#define ROAD_METRES_PER_SENSOR_MM 0.1f
 #define ROAD_MIN_GAP_M           2.0f
-#define ROAD_MAX_GAP_M           100.0f
+#define ROAD_MAX_GAP_M           70.0f
 #define ROAD_ECHO_PERIOD_US      60000U
 #define ROAD_ECHO_TIMEOUT_US     35000U
 #define ROAD_ECHO_TRIGGER_US     12U
@@ -38,8 +38,9 @@
  * red_near_mm/red_far_mm are FIXED reference points, never derived from
  * speed or the IDM's dynamic desired gap -- brightness must not move just
  * because the car sped up while the object's real distance stayed put. */
-#define ROAD_RED_FAR_M           12.0f /* fixed far edge: LED fully off here */
-#define ROAD_RED_MIN_SPAN_M      1.0f /* minimum fade band in road metres */
+#define ROAD_RED_NEAR_DAY_MM     80.0f
+#define ROAD_RED_NEAR_NIGHT_MM   140.0f
+#define ROAD_RED_FAR_MM          600.0f
 #define ROAD_RED_PWM_PERIOD_US   1000U
 #define ROAD_RED_FADE_MS         500U /* full off-to-on ramp duration */
 
