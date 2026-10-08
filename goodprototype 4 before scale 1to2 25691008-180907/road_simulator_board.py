@@ -302,7 +302,7 @@ void main() {
         ldr_text.text=f'ADC {sim.packet.ldr_adc}' if fresh else 'ADC --'
         range_state.text={0:'VALID ECHO',1:'NO RETURN',2:'CHECK SENSOR'}[sim.packet.range_status] if fresh else 'WAITING'
         if fresh and measured_gap is not None and measured_gap > LEAD_VISIBLE_MAX_M:
-            range_state.text=f'OUTSIDE VIEW (>{LEAD_VISIBLE_MAX_M:g} m)'
+            range_state.text='OUTSIDE VIEW (>80 m)'
         telemetry.text='BRAKING' if fresh and sim.braking and not sim.done else ''
         accel_notice.enabled=bool(fresh and sim.packet.accel_blocked and
                                   not sim.packet.fault and not sim.done and not popup.enabled)

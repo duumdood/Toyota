@@ -17,18 +17,18 @@ sys.path[:0]=[str(ROOT),str(ROOT/'.runtime')]
 from road_board_io import parse_frame, LineDecoder, BoardView, SerialReceiver
 
 
-def run_c(gcc, source_dir):
+def run_c(gcc):
     import unicorn as u
     from unicorn import arm_const as a
-    build=ROOT/'tmp'/('board_tests_' + source_dir.name)
+    build=ROOT/'tmp'/'board_tests'
     build.mkdir(parents=True,exist_ok=True)
     elf=build/'core_tests.elf'
     subprocess.run([gcc,'-std=c11','-Wall','-Wextra','-Werror','-Wconversion','-Os',
         '-mcpu=cortex-m4','-mthumb','-mfpu=fpv4-sp-d16','-mfloat-abi=hard',
-        '-I',str(source_dir),'-nostartfiles','--specs=nosys.specs',
+        '-I',str(ROOT/'stm32_road'),'-nostartfiles','--specs=nosys.specs',
         '-Wl,-Ttext=0x08000000,-Tdata=0x20000000,-e,run_tests',
-        str(ROOT/'tests'/'board_core_tests.c'),str(source_dir/'road_app.c'),
-        str(source_dir/'road_protocol.c'),'-o',str(elf)],check=True)
+        str(ROOT/'tests'/'board_core_tests.c'),str(ROOT/'stm32_road'/'road_app.c'),
+        str(ROOT/'stm32_road'/'road_protocol.c'),'-o',str(elf)],check=True)
     prefix=str(Path(gcc).parent/'arm-none-eabi-')
     binary=build/'core_tests.bin'
     subprocess.run([prefix+'objcopy.exe','-O','binary','--only-section=.text','--only-section=.rodata',str(elf),str(binary)],check=True)
@@ -69,19 +69,6 @@ def python_checks(frame):
     assert d.feed(frame+frame)==[p,p]
     def wire(body):
         return body+b'*'+f'{zlib.crc32(body):08X}'.encode()+b'\n'
-    far_fields=frame.split(b'*')[0].split(b',')
-    far_fields[7]=b'140000'
-    far_fields[11]=b'700'
-    assert parse_frame(wire(b','.join(far_fields))).gap_m==140
-    far_fields[7]=b'140001'
-    try: parse_frame(wire(b','.join(far_fields)))
-    except ValueError: pass
-    else: raise AssertionError('gap beyond demo maximum accepted')
-    far_fields[7]=b'-1'
-    far_fields[9]=str(int(far_fields[9]) & ~(2 | 4 | 64)).encode()
-    far_fields[11]=b'1200'
-    outside=parse_frame(wire(b','.join(far_fields)))
-    assert outside.gap_m is None and outside.distance_mm==1200 and outside.range_status==0
     fields=frame.split(b'*')[0].split(b',')
     fields[9]=str(int(fields[9]) & ~64).encode()
     assert not parse_frame(wire(b','.join(fields))).accel_blocked
@@ -144,6 +131,5 @@ def python_checks(frame):
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('--gcc',required=True)
-    parser.add_argument('--source-dir',type=Path,default=ROOT/'stm32_road')
     args=parser.parse_args()
-    python_checks(run_c(args.gcc, args.source_dir.resolve()))
+    python_checks(run_c(args.gcc))

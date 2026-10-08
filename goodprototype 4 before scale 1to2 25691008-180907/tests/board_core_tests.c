@@ -61,7 +61,7 @@ static int blocked_tests(void)
     a=blocked; a.out.speed_mps=30.0f; a.out.target_mps=30.06f;
     i.ldr_adc=1000U;
     RoadApp_Tick(&a,&i,20U); CHECK(!a.out.accel_blocked);
-    a=blocked; a.out.speed_mps=0.1f; i.distance_mm=20U;
+    a=blocked; a.out.speed_mps=0.1f; i.distance_mm=40U;
     RoadApp_Tick(&a,&i,20U);
     CHECK(a.out.done && !a.out.accel_blocked);
     /* Fresh night mode with room below cruise cap still warns for close lead. */
@@ -78,21 +78,11 @@ int run_tests(void)
     RoadApp_Init(&scale); scale.out.target_mps=0.0f;
     measured.ldr_ready=true; measured.ldr_adc=1000U; measured.range_ready=true;
     measured.range_sequence=1U; measured.distance_mm=400U;
-    RoadApp_Tick(&scale,&measured,10U); CHECK(scale.out.present && scale.out.gap_m==80.0f);
+    RoadApp_Tick(&scale,&measured,10U); CHECK(scale.out.gap_m==40.0f);
     measured.range_sequence++; measured.distance_mm=700U;
-    RoadApp_Tick(&scale,&measured,20U); CHECK(scale.out.present && scale.out.gap_m==140.0f);
-    measured.range_sequence++; measured.distance_mm=701U;
-    RoadApp_Tick(&scale,&measured,30U); CHECK(!scale.out.present && !scale.out.lead_valid && !scale.out.fault);
-    measured.range_sequence++; measured.distance_mm=700U;
-    RoadApp_Tick(&scale,&measured,40U);
-    CHECK(scale.out.present && scale.out.gap_m==140.0f && !scale.out.lead_valid);
-    CHECK((uint32_t)(scale.out.gap_m / ROAD_SEG_METRES_PER_STEP)==7U);
-    scale.out.speed_mps=20.0f; scale.out.target_mps=25.0f;
-    scale.out.accel_blocked=true; scale.accel_request_mps=25.0f;
-    measured.range_sequence++; measured.distance_mm=1200U;
-    RoadApp_Tick(&scale,&measured,50U);
-    CHECK(!scale.out.present && !scale.out.accel_blocked && !scale.out.fault);
-    CHECK(scale.out.acceleration_mps2>0.0f && scale.out.red_target_permille==0U);
+    RoadApp_Tick(&scale,&measured,20U); CHECK(scale.out.gap_m==70.0f);
+    measured.range_sequence++; measured.distance_mm=900U;
+    RoadApp_Tick(&scale,&measured,30U); CHECK(scale.out.gap_m==70.0f);
     CHECK(Road_DesiredGap(20.0f,0.0f,false)==24.0f);
     CHECK(Road_DesiredGap(20.0f,0.0f,true)==43.0f);
     CHECK(Road_DesiredGap(20.0f,5.0f,false)>24.0f);
@@ -154,7 +144,7 @@ int run_tests(void)
     i.ldr_adc=ROAD_NIGHT_ENTER_ADC; step(&a,&i,&ms,100U); CHECK(!a.out.night);
 
     /* Constant measured range: signed lead estimate matches ego speed. */
-    i.range_status=0U; i.distance_mm=350U;
+    i.range_status=0U; i.distance_mm=1000U;
     step(&a,&i,&ms,150U);
     CHECK(a.out.present && a.out.lead_valid && a.out.gap_m==70.0f);
     CHECK(a.out.lead_speed_mps-a.out.speed_mps<0.001f);
@@ -162,7 +152,7 @@ int run_tests(void)
     CHECK(!a.out.present && !a.out.lead_valid);
 
     /* Close sudden appearance: conservative lead unknown, eventual STOP. */
-    i.range_status=0U; i.distance_mm=20U;
+    i.range_status=0U; i.distance_mm=40U;
     step(&a,&i,&ms,1000U);
     CHECK(a.out.done && a.out.done_reason==1U && a.out.speed_mps==0.0f);
     float target=a.out.target_mps;
@@ -203,12 +193,12 @@ int run_tests(void)
     }
     CHECK(a.out.lead_valid);
     float relative=a.out.lead_speed_mps-a.out.speed_mps;
-    CHECK(relative < -6.40f && relative > -6.92f);
-    i.distance_mm=20U; step(&a,&i,&ms,6U);
+    CHECK(relative < -3.20f && relative > -3.46f);
+    i.distance_mm=40U; step(&a,&i,&ms,6U);
     CHECK(!a.out.lead_valid); /* discontinuous acquisition does not invent speed */
 
     RoadApp_Init(&a); ms=0U; i=(RoadInputs){0};
-    i.ldr_ready=true; i.ldr_adc=1600U; i.range_status=0U; i.distance_mm=350U;
+    i.ldr_ready=true; i.ldr_adc=1600U; i.range_status=0U; i.distance_mm=1000U;
     a.out.speed_mps=30.0f; a.out.target_mps=30.0f;
     step(&a,&i,&ms,6000U);
     CHECK(a.out.done && a.out.done_reason==2U && a.out.speed_mps>0.3f);
@@ -220,7 +210,7 @@ int run_tests(void)
     a.out.lead_speed_mps=12.0f; a.out.done=false; a.out.done_reason=0U;
     a.out.braking=true; a.out.fault=false;
     a.out.accel_blocked=true;
-    i.ldr_adc=3900U; i.distance_mm=100U;
+    i.ldr_adc=3900U; i.distance_mm=400U;
     g_test_frame_size=(uint32_t)RoadProtocol_Encode(g_test_frame,sizeof g_test_frame,&a.out,&i,42U,12345U);
     CHECK(g_test_frame_size>0U && g_test_frame_size<ROAD_FRAME_CAPACITY);
     char tiny[5]; CHECK(RoadProtocol_Encode(tiny,sizeof tiny,&a.out,&i,0U,0U)==0U);

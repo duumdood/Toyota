@@ -44,23 +44,23 @@ def factory(**kw):
         assert env['speed'].text=='--'
         assert not [e for e in ursina.scene.entities if isinstance(e,ursina.Button)
                     and any(word in str(getattr(e,'text','')).upper() for word in ('SPEED','RESET','DAY / NIGHT','SUDDEN','DRAG'))]
-        receiver.p=BoardTelemetry(1,100,20,25,-2,0,25,15,False,True,False,False,1600,125,0,0,0)
+        receiver.p=BoardTelemetry(1,100,20,25,-2,0,25,15,False,True,False,False,1600,500,0,0,0)
         receiver.set()
         tick(5)
         assert env['speed'].text=='72' and env['telemetry'].text=='BRAKING'
         capture('preview_board_day.png')
-        receiver.set(sequence=2,board_ms=150,distance_mm=1200,gap_m=None,lead_speed_mps=None)
+        receiver.set(sequence=2,board_ms=150,distance_mm=1200,gap_m=70)
         tick()
-        assert env['range_text'].text=='240.0 m'
+        assert env['range_text'].text=='120.0 m'
         assert not env['lead'].enabled
-        assert env['range_state'].text=='OUTSIDE VIEW (>140 m)'
+        assert env['range_state'].text=='OUTSIDE VIEW (>80 m)'
         capture('preview_board_range_far.png')
-        receiver.set(sequence=3,board_ms=200,distance_mm=700,gap_m=140,lead_speed_mps=15)
+        receiver.set(sequence=3,board_ms=200,distance_mm=800)
         tick()
-        assert env['range_text'].text=='140.0 m' and env['lead'].enabled
-        assert env['sim'].scene_gap_m==140
-        capture('preview_board_range_140m.png')
-        receiver.set(sequence=4,board_ms=250,distance_mm=125,gap_m=25)
+        assert env['range_text'].text=='80.0 m' and env['lead'].enabled
+        assert env['sim'].scene_gap_m==80
+        capture('preview_board_range_80m.png')
+        receiver.set(sequence=4,board_ms=250,distance_mm=500,gap_m=25)
         tick()
         receiver.set(accel_blocked=True)
         tick(); assert env['accel_notice'].enabled
@@ -86,7 +86,7 @@ def factory(**kw):
         for n in range(4):
             receiver.set(sequence=10+n,board_ms=400+n*50,reset_id=1,
                          done=False,done_reason=0,speed_mps=60/3.6,
-                         gap_m=5,distance_mm=25)
+                         gap_m=5,distance_mm=100)
             tick()
         assert env['headline'].text=='CRASH!' and not env['physics_warn'].enabled
         assert not env['accel_notice'].enabled

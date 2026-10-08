@@ -210,10 +210,10 @@ static void display_digit(uint32_t digit)
 
 static void update_seven_segment(const RoadInputs *input)
 {
-    bool valid = app.out.present && input->range_ready && input->range_status == 0U &&
+    bool valid = input->range_ready && input->range_status == 0U &&
                  (uint32_t)(g_road_ms-input->range_ms) <= ROAD_SENSOR_STALE_MS;
     if (valid) {
-        uint32_t digit = (uint32_t)(app.out.gap_m / ROAD_SEG_METRES_PER_STEP);
+        uint32_t digit = (uint32_t)(app.out.gap_m / 10.0f);
         display_digit(digit > 9U ? 9U : digit);
     } else {
         /* Alternate valid digits for no data; decoder blank-code is unverified. */

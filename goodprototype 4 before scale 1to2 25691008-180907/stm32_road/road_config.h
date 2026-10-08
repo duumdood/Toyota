@@ -23,13 +23,11 @@
 #define ROAD_NIGHT_EXIT_MS       200U
 #define ROAD_SENSOR_STALE_MS     250U
 
-/* Desktop demo: 10 mm measured = 2 m of road; 70 cm covers 140 m.
+/* Desktop demo: 10 mm measured = 1 m of road; 70 cm covers the full scene.
  * Physical distance stays separately available as distance_mm. */
-#define ROAD_METRES_PER_SENSOR_MM 0.2f
+#define ROAD_METRES_PER_SENSOR_MM 0.1f
 #define ROAD_MIN_GAP_M           2.0f
-#define ROAD_SENSOR_VIEW_MAX_MM  700U /* Beyond this: outside the demo scene. */
-#define ROAD_MAX_GAP_M           ((float)ROAD_SENSOR_VIEW_MAX_MM * ROAD_METRES_PER_SENSOR_MM)
-#define ROAD_SEG_METRES_PER_STEP 20.0f /* One digit: 4 = 80 m, 7 = 140 m. */
+#define ROAD_MAX_GAP_M           70.0f
 #define ROAD_ECHO_PERIOD_US      60000U
 #define ROAD_ECHO_TIMEOUT_US     35000U
 #define ROAD_ECHO_TRIGGER_US     12U

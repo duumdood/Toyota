@@ -89,7 +89,7 @@ static void update_range(RoadApp *app, const RoadInputs *input)
 {
     if (!input->range_ready || input->range_sequence == app->seen_range) { return; }
     app->seen_range = input->range_sequence;
-    if (input->range_status != 0U || input->distance_mm > ROAD_SENSOR_VIEW_MAX_MM) {
+    if (input->range_status != 0U) {
         app->out.present = app->out.lead_valid = app->have_previous_range = false;
         app->range_rate = app->estimate_age = app->settled_s = 0.0f;
         app->did_brake = false;

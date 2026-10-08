@@ -1,0 +1,1 @@
+Snapshot before 1 cm = 2 m calibration. Includes both firmware source sets, Python and tests. SHA256.json records the original copied files. Restore a complete source set together with both Python files.

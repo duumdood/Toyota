@@ -22,9 +22,8 @@ CRASH_DEFICIT_M = 0.5
 CRASH_MIN_SPEED_MPS = 1.0
 CRASH_CONFIRM_MS = 120
 CRASH_MAX_PACKET_GAP_MS = 150
-VISUAL_METRES_PER_SENSOR_MM = 0.2  # 1 real cm = 2 visual metres; match road_config.h.
-SENSOR_VIEW_MAX_MM = 700
-LEAD_VISIBLE_MAX_M = SENSOR_VIEW_MAX_MM * VISUAL_METRES_PER_SENSOR_MM
+VISUAL_METRES_PER_SENSOR_MM = 0.1  # 1 real cm = 1 visual metre.
+LEAD_VISIBLE_MAX_M = 80.0
 
 
 def visual_gap(packet):
@@ -86,7 +85,7 @@ def parse_frame(line: bytes) -> BoardTelemetry:
             and 0 <= reason <= 2 and 0 <= status <= 2 and (mm == -1 or 1 <= mm <= 5000)):
         raise ValueError('telemetry outside physical/protocol bounds')
     present, valid = bool(flags & 2), bool(flags & 4)
-    if (present and not 2000 <= gap <= round(LEAD_VISIBLE_MAX_M * 1000)) or (not present and gap != -1):
+    if (present and not 2000 <= gap <= 100000) or (not present and gap != -1):
         raise ValueError('inconsistent range')
     if valid and not present:
         raise ValueError('lead estimate without target')
@@ -315,5 +314,5 @@ class BoardView:
         self.scene_gap_m = raw_gap
         if raw_gap is not None and self._scene_origin is not None and not self.done:
             self.scene_gap_m = self._scene_origin + (raw_gap-self._scene_origin)*alpha
-        self.scene_visible = bool(not packet.fault and display_packet.gap_m is not None and raw_gap is not None
+        self.scene_visible = bool(not packet.fault and raw_gap is not None
                                   and raw_gap <= LEAD_VISIBLE_MAX_M)
